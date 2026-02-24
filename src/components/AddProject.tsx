@@ -12,7 +12,7 @@ export default function AddProject({ onAdded }: { onAdded: () => void }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
- 
+
     if (!make || !model || !year) return;
 
     const { error } = await supabase.from('automotive_projects').insert({
