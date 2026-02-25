@@ -1,19 +1,18 @@
 import { useEffect, useState } from 'react';
-import AddProject from './components/AddProject';
-import ProjectsList from './components/ProjectsList';
-import ShopPage from './components/ShopPage';
-
-type Page = 'projects' | 'add' | 'shop';
+import { Routes, Route, Link, useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import AddProject from '../components/AddProject';
+import ProjectsList from '../components/ProjectsList';
+import ShopPage from '../components/ShopPage';
 
 export default function App() {
-  const [page, setPage] = useState<Page>('projects');
   const [pinInput, setPinInput] = useState('');
   const [authorized, setAuthorized] = useState(false);
   const [errorCount, setErrorCount] = useState(0);
   const [lockedOut, setLockedOut] = useState(false);
   const [cooldown, setCooldown] = useState(0);
 
-  const correctPin = '22443';
+  const navigate = useNavigate();
 
   // Restore session
   useEffect(() => {
@@ -23,38 +22,44 @@ export default function App() {
 
   // Cooldown timer
   useEffect(() => {
-    let timer: NodeJS.Timeout;
     if (lockedOut && cooldown > 0) {
-      timer = setInterval(() => {
-        setCooldown((prev) => prev - 1);
-      }, 1000);
+      const timer = setTimeout(() => setCooldown(prev => prev - 1), 1000);
+      return () => clearTimeout(timer);
     }
 
     if (cooldown === 0 && lockedOut) {
       setLockedOut(false);
       setErrorCount(0);
     }
-
-    return () => clearInterval(timer);
   }, [lockedOut, cooldown]);
 
   const handleNumberClick = (num: string) => {
     if (lockedOut) return;
     if (pinInput.length < 5) {
-      setPinInput((prev) => prev + num);
+      setPinInput(prev => prev + num);
     }
   };
 
-  const handleClear = () => {
-    setPinInput('');
-  };
+  const handleClear = () => setPinInput('');
 
-  const handleUnlock = () => {
-    if (lockedOut) return;
+  const handleUnlock = async () => {
+    if (lockedOut || pinInput.length < 5) return;
 
-    if (pinInput === correctPin) {
+    // 🔥 Fetch PIN directly from Supabase
+    const { data, error } = await supabase
+      .from('garage_access')
+      .select('pin')
+      .single();
+
+    if (error || !data) {
+      console.error('Failed to fetch PIN:', error);
+      return;
+    }
+
+    if (pinInput === data.pin) {
       setAuthorized(true);
       sessionStorage.setItem('garage_auth', 'true');
+      navigate('/');
     } else {
       const newErrors = errorCount + 1;
       setErrorCount(newErrors);
@@ -67,10 +72,10 @@ export default function App() {
     }
   };
 
+  // ---------- LOCK SCREEN ----------
   if (!authorized) {
     return (
       <div className="min-h-screen bg-[#0c0f14] flex items-center justify-center text-gray-100 relative overflow-hidden">
-        {/* Scanning Line */}
         <div className="absolute top-0 left-0 w-full h-1 bg-red-500 animate-pulse opacity-50"></div>
 
         <div className="bg-[#161c26] border border-[#2a313d] rounded-2xl p-10 w-[420px] shadow-2xl text-center relative">
@@ -80,14 +85,12 @@ export default function App() {
 
           <p className="text-xs text-gray-500 mb-6">AUTHORIZATION REQUIRED</p>
 
-          {/* PIN DISPLAY */}
           <div className="mb-6 bg-[#1b212c] border border-[#303845] rounded-lg py-3 tracking-widest text-lg">
             {pinInput.padEnd(5, '_')}
           </div>
 
-          {/* KEYPAD */}
           <div className="grid grid-cols-3 gap-4 mb-6">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+            {[1,2,3,4,5,6,7,8,9].map(num => (
               <button
                 key={num}
                 onClick={() => handleNumberClick(num.toString())}
@@ -119,7 +122,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* LOCKOUT MESSAGE */}
           {lockedOut && (
             <p className="text-red-500 animate-pulse">
               SYSTEM LOCKED — TRY AGAIN IN {cooldown}s
@@ -127,13 +129,16 @@ export default function App() {
           )}
 
           {!lockedOut && errorCount > 0 && (
-            <p className="text-red-500 text-sm">INVALID PIN ({errorCount}/3)</p>
+            <p className="text-red-500 text-sm">
+              INVALID PIN ({errorCount}/3)
+            </p>
           )}
         </div>
       </div>
     );
   }
 
+  // ---------- AUTHORIZED VIEW ----------
   return (
     <div className="min-h-screen bg-[#0c0f14] text-gray-100 flex flex-col">
       <header className="bg-[#141821] border-b border-[#262d38] px-10 py-6 flex justify-between items-center shadow-lg">
@@ -151,57 +156,30 @@ export default function App() {
       </header>
 
       <div className="bg-[#10141b] border-b border-[#262d38] px-10 py-6 flex gap-6">
-        <ControlButton
-          label="ACTIVE BUILDS"
-          active={page === 'projects'}
-          onClick={() => setPage('projects')}
-        />
-        <ControlButton
-          label="NEW BUILD"
-          active={page === 'add'}
-          onClick={() => setPage('add')}
-        />
-        <ControlButton
-          label="PARTS"
-          active={page === 'shop'}
-          onClick={() => setPage('shop')}
-        />
+        <NavButton to="/" label="ACTIVE BUILDS" />
+        <NavButton to="/add" label="NEW BUILD" />
+        <NavButton to="/shop" label="PARTS" />
       </div>
 
       <main className="flex-1 p-12 bg-[#0f141c]">
         <div className="max-w-7xl mx-auto bg-[#161c26] border border-[#2a313d] rounded-2xl p-10 shadow-2xl">
-          {page === 'projects' && <ProjectsList />}
-          {page === 'add' && <AddProject onAdded={() => setPage('projects')} />}
-          {page === 'shop' && <ShopPage />}
+          <Routes>
+            <Route path="/" element={<ProjectsList />} />
+            <Route path="/add" element={<AddProject onAdded={() => navigate('/')} />} />
+            <Route path="/shop" element={<ShopPage />} />
+          </Routes>
         </div>
       </main>
     </div>
   );
 }
 
-function ControlButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
+function NavButton({ to, label }: { to: string; label: string }) {
   return (
-    <button
-      onClick={onClick}
-      className={`
-        px-8 py-4 rounded-lg font-bold tracking-wide transition-all duration-300 border
-        ${
-          active
-            ? 'bg-orange-500 text-black border-orange-500 shadow-lg shadow-orange-500/40'
-            : 'bg-[#1b212c] border-[#303845] hover:border-red-500 hover:bg-[#222938]'
-        }
-      `}
-    >
-      {label}
-    </button>
+    <Link to={to}>
+      <button className="px-8 py-4 rounded-lg font-bold tracking-wide transition-all duration-300 border bg-[#1b212c] border-[#303845] hover:border-red-500 hover:bg-[#222938]">
+        {label}
+      </button>
+    </Link>
   );
 }
-  
